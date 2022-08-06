@@ -34,7 +34,7 @@ def download_from_figshare(doi, data_dir=None):
         raise RuntimeError(f"Bad response: {response.content}")
     response = response.json()
 
-    data_dir = data_dir or "."
+    data_dir = data_dir or Path(__file__).parent
     article_dir = Path(data_dir) / f"figshare_{article_id}"
     if not article_dir.exists():
         os.makedirs(article_dir)
@@ -133,7 +133,7 @@ async def load_structures():
     # Download dataset if missing
     camd_doi = "https://doi.org/10.6084/m9.figshare.19601956.v1"
     files, file_ids, article_id, article_dir = download_from_figshare(camd_doi)
-    structure_file = f"figshare_{article_id}/{file_ids[0]}/files/camd_data_to_release_wofeatures.json"
+    structure_file = f"{article_dir}/{file_ids[0]}/files/camd_data_to_release_wofeatures.json"
     import json
     with open(structure_file, "r") as f:
         structure_data = json.load(f)
