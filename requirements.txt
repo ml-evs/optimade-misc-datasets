@@ -1,2 +1,3 @@
 optimade[server,pymatgen]~=0.19
 tqdm~=4.64
+gunicorn~=20.1

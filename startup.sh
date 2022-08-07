@@ -1,1 +1,1 @@
-uvicorn --app-dir "./camd_tri_dataset" --port 8000 --host 0.0.0.0 "app:app"
+gunicorn -w 1 -k uvicorn.workers.UvicornWorker --chdir "./camd_tri_dataset" "app:app"
