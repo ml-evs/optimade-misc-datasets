@@ -201,7 +201,7 @@ def extract_files(files: List[Path], remove_archive: bool = False):
 
 def load_structures(
     insert: bool = False,
-    top_n: Optional[int] = 10000,
+    top_n: Optional[int] = None,
     remove_archive: bool = True,
 ) -> List[Dict[str, Any]]:
     """Download, extract and convert the CAMD Figshare dataset, optionally
