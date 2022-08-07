@@ -14,4 +14,4 @@ __all__ = "app"
 def load_structures():
     from utils import load_structures
 
-    load_structures(insert=True)
+    load_structures(insert=True, remove_archive=True)

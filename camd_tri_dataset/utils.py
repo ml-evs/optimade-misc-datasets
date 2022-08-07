@@ -3,6 +3,7 @@ import logging
 import math
 import os
 import re
+import shutil
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -199,7 +200,9 @@ def extract_files(files: List[Path], remove_archive: bool = False):
 
 
 def load_structures(
-    insert: bool = False, top_n: Optional[int] = 1000
+    insert: bool = False,
+    top_n: Optional[int] = 10000,
+    remove_archive: bool = True,
 ) -> List[Dict[str, Any]]:
     """Download, extract and convert the CAMD Figshare dataset, optionally
     inserting it into a mock optimade-python-tools database.
@@ -223,10 +226,15 @@ def load_structures(
     optimade_structure_file = Path(f"{article_dir}/optimade_structures.bson")
     if not optimade_structure_file.exists():
         if not structure_file.exists():
-            extract_files(files, remove_archive=False)
+            extract_files(files, remove_archive=remove_archive)
 
         with open(structure_file, "r") as f:
             structure_data = json.load(f)
+
+        if remove_archive:
+            file_path = Path(f"{article_dir}/{file_ids[0]}")
+            LOG.info("Removing extracted archive at %s", file_path)
+            shutil.rmtree(file_path)
 
         optimade_structure_json = []
         if top_n:
