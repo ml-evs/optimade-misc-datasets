@@ -17,7 +17,7 @@ from optimade.models.utils import anonymous_element_generator
 LOG = logging.getLogger("optimade")
 
 SETTINGS = {
-    "OPTIMADE_PROVIDER_FIELDS": '{"structures": ["hull_distance", "formation_energy"]}',
+    "OPTIMADE_PROVIDER_FIELDS": '{"structures": ["hull_distance", "formation_energy", "space_group"]}',
     "OPTIMADE_PROVIDER": '{"prefix": "odbx", "name": "Open Database of Xtals","description": "The CAMD dataset, hosted via OPTIMADE https://doi.org/10.6084/m9.figshare.19601956.v1"}',
     "OPTIMADE_DATABASE_BACKEND": "mongomock",
     "OPTIMADE_INSERT_TEST_DATA": "false",
