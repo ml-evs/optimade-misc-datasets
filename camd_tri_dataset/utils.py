@@ -103,6 +103,8 @@ def download_from_figshare(
                 ):
                     f.write(chunk)
 
+            LOG.info(f"Downloaded file {files['name']!r} to {local_path}")
+
         filenames.append(local_path)
         file_ids.append(files["id"])
 
@@ -186,11 +188,14 @@ def extract_files(files: List[Path], remove_archive: bool = False):
 
     for f in files:
         if str(f).endswith(".tar.gz"):
+            LOG.info(f"Extracting file {f} to {f.parent}")
             with tarfile.open(f, "r:gz") as tar:
                 tar.extractall(f.parent)
+            LOG.info(f"File {f} extracted.")
 
-        if remove_archive:
-            os.remove(f)
+            if remove_archive:
+                LOG.info(f"Removing archive {f}.")
+                os.remove(f)
 
 
 def load_structures(
