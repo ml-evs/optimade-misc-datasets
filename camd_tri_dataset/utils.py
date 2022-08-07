@@ -229,6 +229,8 @@ def load_structures(
             structure_data = json.load(f)
 
         optimade_structure_json = []
+        if top_n:
+            structure_data = structure_data[:top_n]
         for entry in tqdm.tqdm(structure_data):
             structure = camd_entry_to_optimade_model(entry).dict()
             structure.update(structure.pop("attributes"))
