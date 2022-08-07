@@ -89,6 +89,8 @@ def download_from_figshare(
                 file_ids.append(files["id"])
                 continue
 
+        os.makedirs(local_path.parent, exist_ok=True)
+
         with requests.get(download_url, stream=True) as file_stream:
             LOG.info(
                 f"Downloading file {files['name']!r} with size {files['size'] // 1024**2} MB"
