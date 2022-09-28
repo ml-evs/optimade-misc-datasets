@@ -8,7 +8,7 @@ __all__ = "app"
 
 @app.on_event("startup")
 async def load_structures():
-    from utils import (
+    from .utils import (
         camd_entry_to_optimade_model,
         load_structures,
         wren_entry_to_optimade_model,
