@@ -2,12 +2,12 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Union
 
+import pandas as pd
 import pymatgen.core
 import pymatgen.io.vasp
 import tqdm
-import pandas as pd
 
 from optimade.adapters.structures.pymatgen import from_pymatgen
 from optimade.models import StructureResource
@@ -249,29 +249,7 @@ def camd_entry_to_optimade_model(entry: dict[str, Any]) -> StructureResource:
     attributes.hull_distance = entry["stability"]
     attributes.formation_energy = entry["delta_e"]
     attributes.space_group = entry["space_group"]
-    _id = entry["data_id"]
-    return StructureResource(id=_id, attributes=attributes)
-
-
-def entry_to_optimade_model(entry: tuple) -> StructureResource:
-    """Convert a row from the Law et al dataframe into an OPTIMADE structure resource.
-
-    Arguments:
-        entry: A row from the dataframe, as a tuple.
-
-    Returns:
-        A StructureResource model.
-
-    """
-    data = entry
-
-    attributes = from_pymatgen(
-        pymatgen.core.Structure.from_dict(cse["structure"]),
-    )
-
-    _id = material_id
-    attributes.formation_energy = E_f_dft
-    attributes.hull_distance = E_hull_mp_dft
+    _id = "camd-" + entry["data_id"]
     return StructureResource(id=_id, attributes=attributes)
 
 
@@ -307,7 +285,7 @@ def wren_entry_to_optimade_model(entry: tuple) -> StructureResource:
         pymatgen.core.Structure.from_dict(cse["structure"]),
     )
 
-    _id = material_id
+    _id = "wren-" + material_id
     attributes.formation_energy = E_f_dft
     attributes.hull_distance = E_hull_mp_dft
     return StructureResource(id=_id, attributes=attributes)
@@ -351,13 +329,14 @@ def load_structures(
     doi: str,
     target_file: str,
     adapter_function: Callable = None,
-    metadata_csv: Path = None,
+    metadata_csv: Union[str, Path] = None,
     insert: bool = False,
     top_n: int = None,
     remove_archive: bool = False,
+    id_prefix: str = None,
 ) -> list[dict[str, Any]]:
     """Download, extract and convert a Zenodo or Figshare dataset, optionally
-    inserting it into a mock optimade-python-tools database.
+    inserting it into an optimade-python-tools database.
 
     The function expects to find a JSON or gzipped-JSON file at the `target_file`
     path, which itself should contain either a list of objects to pass through the
@@ -369,9 +348,10 @@ def load_structures(
         adapter_function: The function to use to convert the dataset into OPTIMADE models.
         metadata_csv: The path to a CSV file containing metadata for the dataset; if present,
             will crawl the directory for POSCARs and grab energies from the metadata.
-        insert: Whether to insert the converted models into a mock database.
+        insert: Whether to insert the converted models into a database.
         top_n: The number of entries to convert and insert.
         remove_archive: Whether to remove the archive once complete.
+        id_prefix: An optional string to use as a prefix for OPTIMADE IDs
 
     Returns:
         A list of 'flattened' OPTIMADE structure entries.
@@ -415,31 +395,41 @@ def load_structures(
                     structure_data = json.load(f)
                 elif metadata_csv:
                     metadata = pd.read_csv(article_dir / metadata_csv)
-                    for ff in os.walk("."):
+                    extract_files([structure_file])
+                    for ff in os.walk(structure_file.parent, topdown=True):
                         if ff[-1] == ["POSCAR"]:
                             _id = ff[-3].split("/")[-1]
-                            structure = pymatgen.io.vasp.inputs.Poscar.from_file(f"{ff[0]}/POSCAR").structure
+                            structure = pymatgen.io.vasp.inputs.Poscar.from_file(
+                                f"{ff[0]}/POSCAR"
+                            ).structure
                             attributes = from_pymatgen(structure)
-                            attributes.formation_energy = metadata[metadata["id"] == _id]["decomp_energy"].values[0]
-                            s = StructureResource(id=_id, attributes=attributes)
-                            optimade_structure_json.append(s.dict())
+                            attributes.formation_energy = metadata[
+                                metadata["id"] == _id
+                            ]["decomp_energy"].values[0]
+                            if id_prefix:
+                                _id = f"{id_prefix}-{_id}"
+                            s = StructureResource(id=_id, attributes=attributes).dict()
+                            s.update(s.pop("attributes"))
+                            optimade_structure_json.append(s)
                 else:
-                    raise RuntimeError("Cannot read from folder directory without additional metadata file")
-
-            if structure_data and isinstance(structure_data, dict):
-                structure_data = structure_data["data"]
+                    raise RuntimeError(
+                        "Cannot read from folder directory without additional metadata file"
+                    )
 
             if optimade_structure_json:
                 if top_n:
                     optimade_structure_json = optimade_structure_json[:top_n]
-            
+
             else:
+                if structure_data and isinstance(structure_data, dict):
+                    structure_data = structure_data["data"]
                 if top_n:
                     structure_data = structure_data[:top_n]
                 for entry in tqdm.tqdm(structure_data):
-                    structure = adapter_function(entry).dict()
-                    structure.update(structure.pop("attributes"))
-                    optimade_structure_json.append(structure)
+                    if adapter_function:
+                        structure = adapter_function(entry).dict()
+                        structure.update(structure.pop("attributes"))
+                        optimade_structure_json.append(structure)
 
             with open(optimade_structure_file, "w") as f:
                 f.write(bson.json_util.dumps(optimade_structure_json))
@@ -462,9 +452,7 @@ def load_structures(
         if top_n:
             optimade_structure_json = optimade_structure_json[:top_n]
         structures_coll.insert(optimade_structure_json)
-        LOG.info(
-            "Inserted %s structures into mock database", len(optimade_structure_json)
-        )
+        LOG.info("Inserted %s structures into database", len(optimade_structure_json))
 
     return optimade_structure_json
 
@@ -475,16 +463,16 @@ if __name__ == "__main__":
     load_structures(
         "10.5281/zenodo.7089031",
         "./upper-bound-energy-gnn-0.1/paper_results/relaxed_structures.tar.gz",
-        entry_to_optimade_model,
         metadata_csv="./upper-bound-energy-gnn-0.1/paper_results/dft_confirmation.csv",
+        id_prefix="law-gnn",
     )
 
     # CAMD dataset
-    #load_structures(
-    #    "10.6084/m9.figshare.19601956.v1",
-    #    "./34818031/files/camd_data_to_release_wofeatures.json",
-    #    camd_entry_to_optimade_model,
-    #)
+    load_structures(
+        "10.6084/m9.figshare.19601956.v1",
+        "./34818031/files/camd_data_to_release_wofeatures.json",
+        camd_entry_to_optimade_model,
+    )
 
     # Wren dataset
     load_structures(
