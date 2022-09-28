@@ -465,6 +465,8 @@ if __name__ == "__main__":
         "./upper-bound-energy-gnn-0.1/paper_results/relaxed_structures.tar.gz",
         metadata_csv="./upper-bound-energy-gnn-0.1/paper_results/dft_confirmation.csv",
         id_prefix="law-gnn",
+        insert=True,
+        remove_archive=True,
     )
 
     # CAMD dataset
@@ -472,6 +474,8 @@ if __name__ == "__main__":
         "10.6084/m9.figshare.19601956.v1",
         "./34818031/files/camd_data_to_release_wofeatures.json",
         camd_entry_to_optimade_model,
+        insert=True,
+        remove_archive=True,
     )
 
     # Wren dataset
@@ -479,4 +483,6 @@ if __name__ == "__main__":
         "10.5281/zenodo.6345276",
         "./prospective.json.gz",
         wren_entry_to_optimade_model,
+        insert=True,
+        remove_archive=True,
     )
