@@ -1,18 +1,5 @@
 # Load settings before importing app
 import logging
-import os
-
-SETTINGS: dict[str, str] = {
-    "OPTIMADE_PROVIDER_FIELDS": '{"structures": ["hull_distance", "formation_energy", "space_group"]}',
-    "OPTIMADE_PROVIDER": '{"prefix": "odbx", "name": "Open Database of Xtals", "description": "Miscellaneous materials discovery datasets, hosted as OPTIMADE APIs"}',
-    "OPTIMADE_DATABASE_BACKEND": "mongodb",
-    "OPTIMADE_MONGO_URI": "mongodb://localhost:27017/optimade",
-    "OPTIMADE_MONGO_DATABASE": "optimade",
-    "OPTIMADE_INSERT_TEST_DATA": "false",
-}
-
-os.environ.update(SETTINGS)
-
 
 from optimade.server.main import app  # noqa
 
