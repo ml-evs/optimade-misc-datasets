@@ -17,4 +17,4 @@ gunicorn \
     --access-logfile logs/odbx_misc_access.log \
     --capture-output \
     --access-logformat "%(t)s: %(h)s %(l)s %(u)s %(r)s %(s)s %(b)s %(f)s %(a)s" \
-    -b unix:/tmp/gunicorn.sock optimade_misc_datasets.application:app
+    -b unix:/tmp/gunicorn_rest_misc.sock optimade_misc_datasets.application:app
