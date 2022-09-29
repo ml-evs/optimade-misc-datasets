@@ -7,9 +7,12 @@ touch logs/odbx_misc_error.log
 
 tail -f -n 20 logs/odbx_misc_access.log logs/odbx_misc_error.log &
 
+python optimade_misc_datasets/utils.py
+
 gunicorn \
     -w 1 \
     -k uvicorn.workers.UvicornWorker \
+    --timeout 500 \
     --error-logfile logs/odbx_misc_error.log \
     --access-logfile logs/odbx_misc_access.log \
     --capture-output \
