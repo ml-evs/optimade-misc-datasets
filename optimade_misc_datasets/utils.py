@@ -456,9 +456,7 @@ def load_structures(
 
     return optimade_structure_json
 
-
-if __name__ == "__main__":
-
+def insert_all_datasets():
     # Law et al dataset
     load_structures(
         "10.5281/zenodo.7089031",
