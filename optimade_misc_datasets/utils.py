@@ -7,6 +7,7 @@ from typing import Any, Callable, Union
 import pandas as pd
 import pymatgen.core
 import pymatgen.io.vasp
+import pymatgen.io.cif
 import tqdm
 
 from optimade.adapters.structures.pymatgen import from_pymatgen
@@ -38,6 +39,30 @@ def download_from_doi(
         return download_from_zenodo(doi, data_dir=data_dir)
     else:
         raise RuntimeError(f"Could not recognize {doi=} as a Zenodo or Figshare DOI.")
+
+def download_from_github(
+    repo: str, data_dir: Path = None, commit_or_branch: str = "main",
+) -> tuple[list[Path], list[int], int, Path]:
+    """Download a single file from a URL. 
+
+    Files will be placed in a folder structure (under `data_dir`) by
+    repo and then path, with an additional top-level metadata.json
+    file containing the full response from the corresponding API.
+
+    Returns:
+        A list of file paths, a list of file ids,
+        the article id and the article directory.
+
+    """
+    repo = repo.replace("github/", "")
+    data_dir = data_dir or Path(__file__).parent
+    local_path = data_dir / f"github_{repo.replace('/', '__')}" / f"{commit_or_branch}.zip"
+    os.makedirs(local_path.parent, exist_ok=True)
+    
+    download_file(f"https://github.com/{repo}/archive/{commit_or_branch}.zip", local_path)
+
+    return [local_path], local_path.parent
+
 
 
 def download_from_zenodo(
@@ -166,7 +191,7 @@ def download_from_figshare(
 
 
 def download_file(
-    url: str, local_path: Path, size: int, name: str, chunk_size: int = 1024**2
+    url: str, local_path: Path, size: int = None, name: str = None, chunk_size: int = 1024**2
 ) -> None:
     """Stream a file from a URL to a local path with a given chunk size.
 
@@ -182,11 +207,12 @@ def download_file(
     import requests
 
     with requests.get(url, stream=True, timeout=REQUEST_TIMEOUT) as file_stream:
-        LOG.info(f"Downloading file {name!r} with size {int(size) // 1024**2} MB")
+        if size:
+            LOG.info(f"Downloading file {name!r} with size {int(size) // 1024**2} MB")
         with open(local_path, "wb") as f:
             for chunk in tqdm.tqdm(
                 file_stream.iter_content(chunk_size=chunk_size),
-                total=int(size) // chunk_size,
+                total=int(size) // chunk_size if size else None,
                 unit=" MB",
             ):
                 f.write(chunk)
@@ -253,6 +279,10 @@ def camd_entry_to_optimade_model(entry: dict[str, Any]) -> StructureResource:
     return StructureResource(id=_id, attributes=attributes)
 
 
+def _3dsc_row_to_optimade_model(entry: dict) -> StructureResource:
+    return entry
+
+
 def wren_entry_to_optimade_model(entry: tuple) -> StructureResource:
     """Convert a row from the Wren dataframe into an OPTIMADE structure resource.
 
@@ -292,7 +322,7 @@ def wren_entry_to_optimade_model(entry: tuple) -> StructureResource:
 
 
 def extract_files(files: list[Path], remove_archive: bool = False) -> None:
-    """Extracts a tar.gz file into its root directory, optionally deleting the
+    """Extracts an archive tar.gz/zip file into its root directory, optionally deleting the
     archive once complete.
 
     Arguments:
@@ -325,10 +355,58 @@ def extract_files(files: list[Path], remove_archive: bool = False) -> None:
                 os.remove(f)
 
 
+def load_from_cifs(structure_file, metadata, id_prefix):
+    structure_data = []
+    data = metadata.to_dict(orient="index")
+    for ind in tqdm.tqdm(data):
+        row = data[ind]
+        cif_fname = row["cif"]
+        _id = f"{id_prefix}/{ind}"
+        structure = pymatgen.io.cif.CifParser(structure_file.parent / "3DSC-main" / "superconductors_3D" / cif_fname).get_structures()[0]
+        breakpoint()
+        attributes = from_pymatgen(structure)
+        attributes.critical_temperature = row["tc"]
+        attributes.formation_energy = row["formation_energy_per_atom_2"]
+        attributes.hull_distance = row["e_above_hull_2"]
+        s = StructureResource(id=_id, attributes=attributes).dict()
+        s.update(s.pop("attributes"))
+        structure_data.append(s)
+
+    return structure_data
+
+            
+def load_from_poscar(structure_file, metadata, id_prefix):
+    optimade_structure_json = []
+    for ff in os.walk(structure_file.parent, topdown=True):
+        if ff[-1] == ["POSCAR"]:
+            _id = ff[-3].split("/")[-1]
+            structure = pymatgen.io.vasp.inputs.Poscar.from_file(
+                f"{ff[0]}/POSCAR"
+            ).structure
+            attributes = from_pymatgen(structure)
+            attributes.formation_energy = metadata[
+                metadata["id"] == _id
+            ]["decomp_energy"].values[0]
+            if id_prefix:
+                _id = f"{id_prefix}-{_id}"
+            s = StructureResource(id=_id, attributes=attributes).dict()
+            s.update(s.pop("attributes"))
+            optimade_structure_json.append(s)
+        else:
+            raise RuntimeError(
+                "Cannot read from folder directory without additional metadata file"
+            )
+    return optimade_structure_json
+
+def law_to_optimade(entry):
+    return entry
+
+
 def load_structures(
     doi: str,
     target_file: str,
     adapter_function: Callable = None,
+    data_load_function: Callable = None,
     metadata_csv: Union[str, Path] = None,
     insert: bool = False,
     top_n: int = None,
@@ -359,85 +437,52 @@ def load_structures(
     """
 
     import gzip
-
     import bson.json_util
-
     from optimade.server.routers.structures import structures_coll
 
     # Download dataset if missing
-    files, file_ids, article_id, article_dir = download_from_doi(doi)
+    if doi.startswith("github"):
+        files, article_dir = download_from_github(doi)
+    else:
+        files, article_dir = download_from_doi(doi)
 
     structure_file = Path(article_dir) / target_file
 
     optimade_structure_file = Path(article_dir) / "optimade_structures.bson"
 
     if not optimade_structure_file.exists():
-        for file_id in file_ids:
-            if not structure_file.exists():
-                extract_files(files, remove_archive=remove_archive)
 
-            if not structure_file.exists():
-                continue
+        extract_files(files, remove_archive=remove_archive)
 
-            mode = "r"
-            if structure_file.suffix == ".gz":
-                mode = "rb"
+        mode = "r"
+        if structure_file.suffix == ".gz":
+            mode = "rb"
+        
+        if ".json" in structure_file.suffixes:
+            if mode == "rb":
+                structure_data = json.loads(
+                    gzip.decompress(f.read()).decode("utf-8")
+                )
+            elif mode == "r":
+                structure_data = json.load(f)
 
-            optimade_structure_json = []
-            structure_data = None
+        if metadata_csv:
+            metadata = pd.read_csv(article_dir / metadata_csv, comment="#")
+            structure_data = data_load_function(structure_file, metadata, id_prefix)
 
-            with open(structure_file, mode) as f:
-                if mode == "rb" and ".json" in structure_file.suffixes:
-                    structure_data = json.loads(
-                        gzip.decompress(f.read()).decode("utf-8")
-                    )
-                elif mode == "r":
-                    structure_data = json.load(f)
-                elif metadata_csv:
-                    metadata = pd.read_csv(article_dir / metadata_csv)
-                    extract_files([structure_file])
-                    for ff in os.walk(structure_file.parent, topdown=True):
-                        if ff[-1] == ["POSCAR"]:
-                            _id = ff[-3].split("/")[-1]
-                            structure = pymatgen.io.vasp.inputs.Poscar.from_file(
-                                f"{ff[0]}/POSCAR"
-                            ).structure
-                            attributes = from_pymatgen(structure)
-                            attributes.formation_energy = metadata[
-                                metadata["id"] == _id
-                            ]["decomp_energy"].values[0]
-                            if id_prefix:
-                                _id = f"{id_prefix}-{_id}"
-                            s = StructureResource(id=_id, attributes=attributes).dict()
-                            s.update(s.pop("attributes"))
-                            optimade_structure_json.append(s)
-                else:
-                    raise RuntimeError(
-                        "Cannot read from folder directory without additional metadata file"
-                    )
+        optimade_structure_json = []
 
-            if optimade_structure_json:
-                if top_n:
-                    optimade_structure_json = optimade_structure_json[:top_n]
-
-            else:
-                if structure_data and isinstance(structure_data, dict):
-                    structure_data = structure_data["data"]
-                if top_n:
-                    structure_data = structure_data[:top_n]
-                for entry in tqdm.tqdm(structure_data):
-                    if adapter_function:
-                        structure = adapter_function(entry).dict()
-                        structure.update(structure.pop("attributes"))
-                        optimade_structure_json.append(structure)
-
-            with open(optimade_structure_file, "w") as f:
-                f.write(bson.json_util.dumps(optimade_structure_json))
-
-            break
-
-        else:
-            raise RuntimeError(f"Could not find {structure_file!r} in data archive.")
+        if structure_data and isinstance(structure_data, dict):
+            structure_data = structure_data["data"]
+        if top_n:
+            structure_data = structure_data[:top_n]
+        for entry in tqdm.tqdm(structure_data):
+            structure = adapter_function(entry).dict()
+            structure.update(structure.pop("attributes"))
+            optimade_structure_json.append(structure)
+    
+        with open(optimade_structure_file, "w") as f:
+            f.write(bson.json_util.dumps(optimade_structure_json))
 
     else:
         with open(optimade_structure_file, "r") as f:
@@ -457,30 +502,44 @@ def load_structures(
     return optimade_structure_json
 
 def insert_all_datasets():
+
+    # 3DSC dataset
+    load_structures(
+        "github/aimat-lab/3DSC",
+        "main.zip",
+        data_load_function=load_from_cifs,
+        adapter_function=_3dsc_row_to_optimade_model,
+        metadata_csv="./3DSC-main/superconductors_3D/data/final/MP/3DSC_MP.csv",
+        insert=True,
+        id_prefix="3dsc",
+    )
+
     # Law et al dataset
-    load_structures(
-        "10.5281/zenodo.7089031",
-        "./upper-bound-energy-gnn-0.1/paper_results/relaxed_structures.tar.gz",
-        metadata_csv="./upper-bound-energy-gnn-0.1/paper_results/dft_confirmation.csv",
-        id_prefix="law-gnn",
-        insert=True,
-        remove_archive=True,
-    )
+    #load_structures(
+    #    "10.5281/zenodo.7089031",
+    #    "./upper-bound-energy-gnn-0.1/paper_results/relaxed_structures.tar.gz",
+    #    metadata_csv="./upper-bound-energy-gnn-0.1/paper_results/dft_confirmation.csv",
+    #    data_load_function=load_from_poscar,
+    #    adapter_function=law_to_optimade,
+    #    id_prefix="law-gnn",
+    #    insert=True,
+    #    remove_archive=True,
+    #)
 
-    # CAMD dataset
-    load_structures(
-        "10.6084/m9.figshare.19601956.v1",
-        "./34818031/files/camd_data_to_release_wofeatures.json",
-        camd_entry_to_optimade_model,
-        insert=True,
-        remove_archive=True,
-    )
+    ## CAMD dataset
+    #load_structures(
+    #    "10.6084/m9.figshare.19601956.v1",
+    #    "./34818031/files/camd_data_to_release_wofeatures.json",
+    #    adapter_function=camd_entry_to_optimade_model,
+    #    insert=True,
+    #    remove_archive=True,
+    #)
 
-    # Wren dataset
-    load_structures(
-        "10.5281/zenodo.6345276",
-        "./prospective.json.gz",
-        wren_entry_to_optimade_model,
-        insert=True,
-        remove_archive=True,
-    )
+    ## Wren dataset
+    #load_structures(
+    #    "10.5281/zenodo.6345276",
+    #    "./prospective.json.gz",
+    #    adapter_function=wren_entry_to_optimade_model,
+    #    insert=True,
+    #    remove_archive=True,
+    #)
